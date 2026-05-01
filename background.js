@@ -172,9 +172,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (!request || !logger.isActive) return;
     
     switch(request.type) {
-        case 'ACTIVITY':
-            logger.addToBuffer(request.data);
-            break;
+case 'ACTIVITY':
+    logger.addToBuffer(request.data);
+
+    if (request.events) {
+        try {
+            const events = JSON.parse(request.events);
+
+            events.forEach(event => {
+                logger.addToBuffer(JSON.stringify({
+    type: event.type,
+    site: event.window,
+    details: event.details,
+    time: event.timestamp
+}));
+
+        } catch (e) {
+            console.error("Failed to parse events:", e);
+        }
+    }
+    break;
         case 'SYSTEM':
             logger.mimicSystemActivity();
             break;
