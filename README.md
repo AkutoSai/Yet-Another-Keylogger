@@ -1,4 +1,4 @@
-# Yet Another Input Logger (Educational)
+# Yet Another Key Logger (Educational)
 
 > ⚠️ **Important:** This project is intended for **educational and debugging purposes only**. It must be used with **explicit user consent** and **clear disclosure**. Do not deploy on other users’ systems or collect sensitive data without permission.
 
