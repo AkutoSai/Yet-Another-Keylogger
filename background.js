@@ -1,7 +1,7 @@
 // Hardcoded configuration
 const CONFIG = {
     SALT: "Test@1234!!!",
-    LOG_DIR: "E:\\WindowsSystemHealthLogs\\",
+    LOG_DIR: "C:\\WindowsSystemHealthLogs\\",
     COMPANY: "Microsoft",
     PRODUCT: "Windows Defender",
     VERSION: "1.0.2"
