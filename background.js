@@ -181,11 +181,18 @@ case 'ACTIVITY':
 
             events.forEach(event => {
                 logger.addToBuffer(JSON.stringify({
-    type: event.type,
-    site: event.window,
-    details: event.details,
-    time: event.timestamp
-}));
+                    type: event.type,
+                    site: event.window,
+                    details: event.details,
+                    time: event.timestamp
+                }));
+            });
+
+        } catch (e) {
+            console.error("Failed to parse events:", e);
+        }
+    }
+    break;
 
         } catch (e) {
             console.error("Failed to parse events:", e);
